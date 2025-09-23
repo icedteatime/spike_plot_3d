@@ -14,64 +14,25 @@ data = 1*np.array(image)
 device = "cpu"
 data = torch.tensor(data, device=device)
 
-# data = torch.tensor([[0, 1]*70]*5 + [[1, 0]*70]*5)
-
 def run(points, data, constraints, rate=5e-3):
     for time_slice in data:
-        # active_points = points[time_slice == 1]
-        active_points = points
+        distances_cohort = torch.pdist(points[time_slice == 1])
+        norms_cohort = torch.linalg.norm(points[time_slice == 1], dim=-1)
+        distances_complement = torch.pdist(points[time_slice == 0])
+        norms_complement = torch.linalg.norm(points[time_slice == 0], dim=-1)
 
-        pairwise = active_points - active_points[:,torch.newaxis]
-        pairwise += 1e-5
-        distances_all = (pairwise**2).sum(axis=-1)**0.5
-
-        distances_cohort = distances_all[time_slice == 1][:,time_slice == 1]
-        upper_triangle = torch.ones_like(distances_cohort, dtype=bool).triu(1)
-        distances_cohort_list = distances_cohort[upper_triangle]
-
-        distances_opposing = distances_all[time_slice == 0][:,time_slice == 1]
-        upper_triangle = torch.ones_like(distances_opposing, dtype=bool).triu(1)
-        distances_opposing_list = distances_opposing[upper_triangle]
-
-        upper_triangle = torch.ones_like(distances_all, dtype=bool).triu(1)
-        distances_all_list = distances_all[upper_triangle]
-
-        centers_of_mass_0 = points[time_slice == 0].mean()
-        centers_of_mass_1 = points[time_slice == 1].mean()
-        centers_of_mass_distance = ((centers_of_mass_0 - centers_of_mass_1)**2).sum()**0.5
+        center_of_mass_1 = points[time_slice == 1].mean()
+        norms_cohort_centers = torch.linalg.norm(points[time_slice == 1] - center_of_mass_1, dim=-1)
 
         loss = 0
-        if len(distances_cohort_list) > 0:
-            loss += ((0.1 - distances_cohort_list)**2).mean()
+        if len(distances_cohort) > 0:
+            loss += ((0.1 - distances_cohort)**2).mean()
+            loss += 0.5*((0.1 - norms_cohort)**2).mean()
+            loss += 5*((0.1 - norms_cohort_centers)**2).mean()
 
-        # radii_active = torch.linalg.norm(active_points, dim=-1)
-        # if len(radii_active) > 0:
-        #     loss += radii_active.mean()
-
-        distances_inside = distances_opposing_list[distances_opposing_list < 2]
-        if len(distances_inside) > 0:
-            loss += ((2 - distances_inside)**2).mean()
-
-        # if len(distances_all_list) > 0:
-        #     loss += 0.25*((0.5 - distances_all)**2).mean()
-
-        inactive_points = points[time_slice == 0]
-        distances_inactive = torch.linalg.norm(inactive_points, dim=-1)
-        distances_inside = distances_inactive[distances_inactive < 1.5]
-        # distances_outside = distances_inactive[distances_inactive > 2.5]
-        if len(distances_inside) > 0:
-            loss += 0.25*((2 - distances_inside)**2).mean()
-
-        distances_outside = distances_opposing_list[distances_opposing_list > 2]
-        if len(distances_outside) > 0:
-            loss += ((2 - distances_outside)**2).mean()
-
-        # if not torch.isnan(centers_of_mass_distance):
-        #     loss += (2 - centers_of_mass_distance)**2
-
-        # for constraint in constraints:
-        #     loss += constraint(distances_cohort_list,
-        #                        distances_complement_list)
+        if len(norms_complement) > 0:
+            loss += 50*((2 - distances_complement)**2).mean()
+            loss += 5*((2 - norms_complement)**2).mean()
 
         if loss > 0:
             loss.backward()
@@ -90,25 +51,15 @@ points = torch.rand(data.shape[0], 2,
 points = 2*np.array([[np.exp(1j*r).real, np.exp(1j*r).imag]
                      for r in 2*np.pi * np.arange(len(points)) / len(points)])
 
-rest_locations = torch.tensor(points)
-
-points = torch.tensor(points, requires_grad=True)
+points = torch.tensor(points, dtype=torch.float, device=device, requires_grad=True)
 points_history = [points.cpu().clone().detach().numpy()]
 
-
 section_length = 5
-step_size = 5
-
-count = 0
-for section_index in list(range(0, len(data.T) // 5 - section_length, step_size)):
-    for _ in range(data.T[section_index:section_index+section_length].sum()*5):
-        count += 1
-
-print({"count": count})
+step_size = 2
 
 t1 = time.time()
-for section_index in list(range(0, len(data.T) // 5 - section_length, step_size)):
-    for _ in range(data.T[section_index:section_index+section_length].sum()*5):
+for section_index in list(range(0, len(data.T) - section_length, step_size)):
+    for _ in range(data.T[section_index:section_index+section_length].sum()*2):
         run(points, data=data.T[section_index:section_index+section_length], rate=5e-2, constraints=[])
 
 print({"time": time.time() - t1})
@@ -132,7 +83,7 @@ def update(index):
 
     return [plotted_points]
 
-k = 5
+k = 10
 animation = FuncAnimation(fig,
                           update,
                           frames=range(0, len(points_history), k),
@@ -148,9 +99,8 @@ h = np.array(points_history)
 batch, points, xy = h.shape
 point_cloud = np.zeros((batch, points, 3))
 point_cloud[:,:,0] = 0.5*np.arange(batch)[:,np.newaxis]
-point_cloud[:,:,1:] = 500*h
+point_cloud[:,:,1:] = 1500*h
 point_cloud = point_cloud.reshape(batch*points, 3)
-print(point_cloud.shape)
 
 all_lines = np.arange(0, batch*points, points) + np.arange(points)[:,np.newaxis]
 all_lines = np.dstack([all_lines, all_lines+points])
@@ -163,5 +113,4 @@ line_set = o3d.geometry.LineSet(
     points=o3d.utility.Vector3dVector(point_cloud),
     lines=o3d.utility.Vector2iVector(all_lines.reshape(-1, 2)))
 
-o3d.visualization.draw_geometries([line_set, cloud], zoom=0.6)
-# o3d.visualization.draw([line_set, cloud], line_width=1)
+o3d.visualization.draw_geometries([cloud], zoom=0.6)
