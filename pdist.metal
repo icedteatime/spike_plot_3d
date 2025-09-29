@@ -30,14 +30,11 @@ uint2 source_indices(constant uint& length, uint pair_index) {
 }
 
 kernel void pairwise_distances(device float* out,
-                               device float* in,
+                               device float2* in,
                                constant uint& length,
                                uint index [[thread_position_in_grid]]) {
 
     uint2 I = source_indices(length, index);
 
-    float2 p1 = float2(in[2*I.x], in[2*I.x + 1]);
-    float2 p2 = float2(in[2*I.y], in[2*I.y + 1]);
-
-    out[index] = metal::distance(p1, p2);
+    out[index] = metal::distance(in[I.x], in[I.y]);
 }
