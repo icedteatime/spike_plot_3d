@@ -14,7 +14,8 @@ class PairwiseDistances(Function):
         out = torch.zeros(num_pairs, device="mps")
         _library.pairwise_distances_forward(out,     # device float* out
                                             x,       # device float2* points
-                                            len(x))  # constant uint& num_points
+                                            len(x),  # constant uint& num_points
+                                            num_pairs)  # constant uint& num_pairs
 
         ctx.save_for_backward(x, out)
 
@@ -30,9 +31,9 @@ class PairwiseDistances(Function):
 
         out = torch.zeros_like(x)
         _library.pairwise_distances_backward(out,          # device float2* out
+                                             x,            # device float2* points
                                              len(out),     # constant uint& num_points
                                              num_pairs,    # constant uint& num_pairs
-                                             x,            # device float2* points
                                              grad_div_distances)  # device float* grad_div_distances
 
         return out

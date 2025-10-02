@@ -6,27 +6,16 @@ We have an original list of points:
 Indices into this list are source indices.
 
 We also have a list of distances:
-    P = [d(S[0], S[1]), d(S[0], S[2]), d(S[0], S[3]), d(S[2], S[3]), d(S[1], S[2]), d(S[1], S[3])]
+    // P = [d(S[0], S[1]), d(S[0], S[2]), d(S[0], S[3]), d(S[2], S[3]), d(S[1], S[2]), d(S[1], S[3])]
+    P = [d(S[0], S[1]), d(S[0], S[2]), d(S[0], S[3]), d(S[1], S[2]), d(S[1], S[3]), d(S[2], S[3])]
 
 Indices into this list are pair indices.
 */
 
-uint2 pair_index_to_source_indices(constant uint& num_points, uint pair_index) {
+uint2 pair_index_to_source_indices0(uint num_points, uint pair_index) {
     /*
     Given an index into a list of pairs, return the source indices.
     Since P[2] = d(S[0], S[3]), pair_index_to_source_indices(2) = (0, 3).
-
-    The purpose is a closed form function from a linear input into a pair of indices
-    which does not have duplicates. Essentially to save a
-        [(i, j)
-         for i in range(num_points)
-         for j in range(num_points)
-         if i < j]
-    on the outside.
-
-    This implementation is based on traversing a num_points x num_points matrix which
-    represents all ordered pairs, but taking only the upper
-    triangle which represents unordered pairs.
 
     First get the usual i,j coordinate.
     If it is above the diagonal, keep it.
@@ -48,7 +37,7 @@ uint2 pair_index_to_source_indices(constant uint& num_points, uint pair_index) {
     }
 }
 
-uint source_indices_to_pair_index(uint num_points, uint num_pairs, uint2 source_indices) {
+uint source_indices_to_pair_index0(uint num_points, uint num_pairs, uint2 source_indices) {
     /*
     Example: source_indices_to_pair_index((2, 3)) = 3
     */
@@ -66,6 +55,47 @@ uint source_indices_to_pair_index(uint num_points, uint num_pairs, uint2 source_
     }
 
     return I;
+}
+
+uint2 pair_index_to_source_indices(uint num_points, uint num_pairs, uint pair_index) {
+    /*
+    Given an index into a list of pairs, return the source indices.
+    Since P[2] = d(S[0], S[3]), pair_index_to_source_indices(2) = (0, 3).
+
+    This implementation is based on solving for n in the n choose 2 formula.
+        n * (n - 1) / 2
+    */
+
+    // change to "depth first" ordering of pairs
+    pair_index = num_pairs - pair_index - 1;
+    int i = metal::floor(0.5 + metal::sqrt(0.25 + 2*pair_index));
+    int j = pair_index - i * (i - 1) / 2;
+
+    return uint2(num_points - 1 - i, num_points - 1 - j);
+}
+
+
+uint source_indices_to_pair_index(uint num_points, uint num_pairs, uint2 source_indices) {
+    /*
+    Example: source_indices_to_pair_index((2, 3)) = 5
+
+    Reverse of pair_index_to_source_indices.
+    */
+
+    uint i = num_points - 1 - source_indices.x;
+    uint pi = i * (i - 1) / 2 + num_points - source_indices.y - 1;
+
+    return num_pairs - pi - 1;
+}
+
+kernel void debug1(device uint2* out,
+                   constant uint& num_points,
+                   constant uint& num_pairs,
+                   uint index [[thread_position_in_grid]]) {
+
+    uint2 S = pair_index_to_source_indices(num_points, num_pairs, index);
+
+    out[index] = source_indices_to_pair_index(num_points, num_pairs, S);
 }
 
 uint2 pair_for_source_index(uint source_index,
@@ -92,17 +122,18 @@ uint2 pair_for_source_index(uint source_index,
 kernel void pairwise_distances_forward(device float* out,
                                        device float2* points,
                                        constant uint& num_points,
+                                       constant uint& num_pairs,
                                        uint index [[thread_position_in_grid]]) {
 
-    uint2 S = pair_index_to_source_indices(num_points, index);
+    uint2 S = pair_index_to_source_indices(num_points, num_pairs, index);
 
-    out[index] = metal::distance(points[S.x], points[S.y]);
+    out[index] = metal::distance(points[S.x], points[S.y] + 0.000001);
 }
 
 kernel void pairwise_distances_backward(device float2* out,
+                                        device float2* points,
                                         constant uint& num_points,
                                         constant uint& num_pairs,
-                                        device float2* points,
                                         device float* grad_div_distances,
                                         uint index [[thread_position_in_grid]]) {
     /*
