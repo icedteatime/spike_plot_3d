@@ -103,25 +103,29 @@ kernel void pairwise_distances_backward(device float2* out,
                                         constant uint& num_points,
                                         constant uint& num_pairs,
                                         device float2* points,
-                                        device float* distances,
-                                        device float* grad_output,
+                                        device float* grad_div_distances,
                                         uint index [[thread_position_in_grid]]) {
     /*
     For each point, add up the gradient from all of its pairings.
     */
+
+    // index goes from 0 to out.numel()
+    if (index >= num_points) {
+        return ;
+    }
 
     float2 gradient = 0;
     for (uint i = 0; i < num_points - 1; i++) {
         uint2 S = pair_for_source_index(index, i);
         uint I = source_indices_to_pair_index(num_points, num_pairs, S);
 
-        float polarity = 1;
+        int polarity = 1;
         if (S.x < index) {
             polarity = -1;
         }
 
         // Derivative of Euclidean distance d(p1, p2) is (p1 - p2) / d(p1, p2)
-        gradient += (polarity * (points[S.x] - points[S.y]) / distances[I]) * grad_output[I];
+        gradient += polarity * (points[S.x] - points[S.y]) * grad_div_distances[I];
     }
 
     out[index] = gradient;

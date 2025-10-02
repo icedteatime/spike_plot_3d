@@ -22,8 +22,9 @@ class PairwiseDistances(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        x, forward_out = ctx.saved_tensors
-        grad_output = grad_output.contiguous()
+        x, distances = ctx.saved_tensors
+
+        grad_div_distances = grad_output / distances
 
         num_pairs = len(x) * (len(x) - 1) // 2
 
@@ -32,8 +33,7 @@ class PairwiseDistances(Function):
                                              len(out),     # constant uint& num_points
                                              num_pairs,    # constant uint& num_pairs
                                              x,            # device float2* points
-                                             forward_out,  # device float* distances
-                                             grad_output)  # device float* grad_output
+                                             grad_div_distances)  # device float* grad_div_distances
 
         return out
 
